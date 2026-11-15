@@ -3714,9 +3714,7 @@ name = "rul-service"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "dvc" },
     { name = "fastapi" },
-    { name = "mlflow" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pydantic" },
@@ -3726,7 +3724,9 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "dvc" },
     { name = "httpx" },
+    { name = "mlflow" },
     { name = "mypy" },
     { name = "pandas-stubs" },
     { name = "pre-commit" },
@@ -3737,9 +3737,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dvc", specifier = ">=3.67.1" },
     { name = "fastapi", specifier = ">=0.162.0" },
-    { name = "mlflow", specifier = ">=3.18.0" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "pandas", specifier = ">=3.1.0" },
     { name = "pydantic", specifier = ">=2.14.2" },
@@ -3749,7 +3747,9 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "dvc", specifier = ">=3.67.1" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mlflow", specifier = ">=3.18.0" },
     { name = "mypy", specifier = ">=2.4.1" },
     { name = "pandas-stubs", specifier = ">=3.1.0.261029" },
     { name = "pre-commit", specifier = ">=4.7.0" },

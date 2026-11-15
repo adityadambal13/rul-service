@@ -1,6 +1,10 @@
+import copy
+import logging
+import pickle
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from rul_service.model import ModelBundle, evaluate_bundle, load_bundle, save_bundle
 
@@ -43,3 +47,21 @@ def test_evaluate_bundle_returns_sane_metrics(bundle: ModelBundle, train_df: pd.
     }
     assert 0.0 <= metrics["interval_coverage"] <= 1.0
     assert metrics["test_rmse"] >= 0.0
+
+
+def test_bundle_pickle_contains_no_pandas_objects(bundle: ModelBundle) -> None:
+    """Pickled DataFrames can depend on optional packages (pyarrow) and break loading
+    in a slimmer production environment, so the bundle must hold only plain arrays."""
+    assert b"pandas" not in pickle.dumps(bundle)
+
+
+def test_loading_warns_on_scikit_learn_version_mismatch(
+    bundle: ModelBundle, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    older = copy.deepcopy(bundle)  # never modify the shared session fixture
+    older.metadata["sklearn_version"] = "0.0.1"
+    path = tmp_path / "b.joblib"
+    save_bundle(older, path)
+    with caplog.at_level(logging.WARNING, logger="rul_service"):
+        load_bundle(path)
+    assert "scikit-learn 0.0.1" in caplog.text

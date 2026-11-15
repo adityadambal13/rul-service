@@ -18,3 +18,5 @@ models/*
 mlflow.db
 mlartifacts/
 mlruns/
+
+smoke/
