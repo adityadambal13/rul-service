@@ -10,6 +10,7 @@ from typing import Any
 import joblib
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.ensemble import HistGradientBoostingRegressor
 
 from rul_service import config
@@ -17,6 +18,7 @@ from rul_service.data import SENSOR_COLS, SETTING_COLS
 from rul_service.features import RegimeScaler, build_features, last_rows
 from rul_service.labels import add_rul
 from rul_service.metrics import nasa_score, rmse
+from rul_service.utils import logger
 
 
 @dataclass
@@ -102,6 +104,7 @@ def fit_bundle(
         "sensors_kept": scaler.kept_sensors,
         "window": window,
         "rul_cap": cap,
+        "sklearn_version": sklearn.__version__,
         "interval": f"{config.LOWER_QUANTILE:.0%}-{config.UPPER_QUANTILE:.0%} quantiles",
     }
     metadata.update(extra_metadata or {})
@@ -147,4 +150,11 @@ def load_bundle(path: Path) -> ModelBundle:
     obj = joblib.load(path)
     if not isinstance(obj, ModelBundle):
         raise TypeError(f"{path} does not contain a ModelBundle")
+    trained_with = obj.metadata.get("sklearn_version")
+    if trained_with and trained_with != sklearn.__version__:
+        logger.warning(
+            "bundle was trained with scikit-learn %s but this environment has %s",
+            trained_with,
+            sklearn.__version__,
+        )
     return obj

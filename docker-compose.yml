@@ -1,0 +1,13 @@
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    image: rul-service:dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./models:/models:ro
+    environment:
+      RUL_MODEL_PATH: /models/rul_bundle.joblib
+    restart: unless-stopped

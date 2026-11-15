@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Lint, types and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy
+
+      - name: Test
+        run: uv run pytest --cov-fail-under=80
+
+  docker:
+    name: Build image and smoke test
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Create synthetic smoke assets
+        run: |
+          uv sync --frozen
+          uv run python scripts/make_smoke_assets.py
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the runtime image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: runtime
+          load: true
+          tags: rul-service:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start the container
+        run: |
+          docker run -d --name rul -p 8000:8000 \
+            -v "$PWD/smoke/models:/models:ro" rul-service:ci
+
+      - name: Wait until the service is ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/ready > /dev/null; then
+              echo "ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "service did not become ready"
+          exit 1
+
+      - name: Valid request returns a sensible prediction
+        run: |
+          curl -sf -X POST http://localhost:8000/v1/predict \
+            -H "Content-Type: application/json" \
+            -d @smoke/request.json | tee response.json
+          jq -e '.rul >= 0 and .rul_lower <= .rul and .rul <= .rul_upper' response.json
+
+      - name: Invalid request is rejected with 422
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8000/v1/predict \
+            -H "Content-Type: application/json" \
+            -d '{"engine_id":"x","readings":[]}')
+          echo "HTTP $code"
+          test "$code" = "422"
+
+      - name: Container runs as a non-root user
+        run: test "$(docker exec rul id -u)" != "0"
+
+      - name: Show container logs if anything failed
+        if: failure()
+        run: docker logs rul
