@@ -45,6 +45,12 @@ def client(bundle_path: Path) -> Iterator[TestClient]:
 
 
 @pytest.fixture
+def keyed_client(bundle_path: Path) -> Iterator[TestClient]:
+    with TestClient(create_app(bundle_path, api_key="s3cret")) as c:
+        yield c
+
+
+@pytest.fixture
 def client_without_model(tmp_path: Path) -> Iterator[TestClient]:
     with TestClient(create_app(tmp_path / "missing.joblib")) as c:
         yield c

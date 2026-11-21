@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, Security
+from fastapi.security import APIKeyHeader
 
 from rul_service import config
 from rul_service.model import load_bundle
@@ -18,10 +22,21 @@ from rul_service.predictor import InputError, Predictor
 from rul_service.schemas import ModelInfo, PredictRequest, PredictResponse
 from rul_service.utils import logger
 
+# Module level on purpose: FastAPI resolves annotations by name from the module namespace.
+API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
-def create_app(bundle_path: Path | None = None) -> FastAPI:
+
+def create_app(bundle_path: Path | None = None, api_key: str | None = None) -> FastAPI:
+    """Build the app. If an API key is set (argument or RUL_API_KEY), predictions need it."""
     path = bundle_path or config.model_path()
+    required_key = api_key if api_key is not None else (os.environ.get("RUL_API_KEY") or None)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    def require_api_key(supplied: Annotated[str | None, Security(API_KEY_HEADER)]) -> None:
+        if required_key is None:
+            return  # open mode: no key configured
+        if supplied is None or not hmac.compare_digest(supplied.encode(), required_key.encode()):
+            raise HTTPException(status_code=401, detail="invalid or missing API key")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -74,7 +89,7 @@ def create_app(bundle_path: Path | None = None) -> FastAPI:
         predictor = get_predictor(request)
         return {"status": "ready", "model_version": predictor.bundle.version}
 
-    @app.get("/v1/model-info", response_model=ModelInfo)
+    @app.get("/v1/model-info", response_model=ModelInfo, dependencies=[Depends(require_api_key)])
     def model_info(request: Request) -> ModelInfo:
         meta = get_predictor(request).bundle.metadata
         return ModelInfo(
@@ -90,7 +105,9 @@ def create_app(bundle_path: Path | None = None) -> FastAPI:
 
     # A plain `def` endpoint runs in a worker thread, so model inference
     # does not block the server's event loop.
-    @app.post("/v1/predict", response_model=PredictResponse)
+    @app.post(
+        "/v1/predict", response_model=PredictResponse, dependencies=[Depends(require_api_key)]
+    )
     def predict(body: PredictRequest, request: Request) -> PredictResponse:
         predictor = get_predictor(request)
         readings = [r.model_dump() for r in body.readings]

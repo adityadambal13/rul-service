@@ -104,3 +104,70 @@ jobs:
       - name: Show container logs if anything failed
         if: failure()
         run: docker logs rul
+
+  publish:
+    name: Build and publish image
+    runs-on: ubuntu-latest
+    needs: [quality, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Work out the image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Download the trained model from the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(tr -d '[:space:]' < deploy/model-release.txt)
+          echo "Using model release: $tag"
+          gh release download "$tag" --pattern rul_bundle.joblib --dir models
+          ls -l models
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build the image with the model baked in
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: bundled
+          load: true
+          tags: ${{ steps.image.outputs.name }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test the image before it goes anywhere
+        run: |
+          docker run -d --name rul -p 8000:8000 "${{ steps.image.outputs.name }}"
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/ready > /dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:8000/ready
+          curl -sf -X POST http://localhost:8000/v1/predict \
+            -H "Content-Type: application/json" \
+            -d @deploy/sample_request.json | tee local-response.json
+          jq -e '.rul >= 0 and .rul_lower <= .rul and .rul <= .rul_upper' local-response.json
+          docker rm -f rul
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push the image
+        run: docker push "${{ steps.image.outputs.name }}"
+
+      - name: Say how to deploy it
+        run: |
+          echo "### Image published" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.image.outputs.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploy it from your machine: .\\infra\\deploy.ps1 -GitHubOwner ${GITHUB_REPOSITORY_OWNER}" >> "$GITHUB_STEP_SUMMARY"
