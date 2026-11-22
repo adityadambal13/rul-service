@@ -53,23 +53,28 @@ jobs:
         run: |
           uv sync --frozen
           uv run python scripts/make_smoke_assets.py
+          ls -laR smoke
+
+      - name: Put the smoke model where the Dockerfile expects it
+        run: |
+          mkdir -p models
+          cp smoke/models/rul_bundle.joblib models/rul_bundle.joblib
+          ls -l models
 
       - uses: docker/setup-buildx-action@v4
 
-      - name: Build the runtime image
+      - name: Build the image with the smoke model baked in
         uses: docker/build-push-action@v7
         with:
           context: .
-          target: runtime
+          target: bundled
           load: true
           tags: rul-service:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Start the container
-        run: |
-          docker run -d --name rul -p 8000:8000 \
-            -v "$PWD/smoke/models:/models:ro" rul-service:ci
+        run: docker run -d --name rul -p 8000:8000 rul-service:ci
 
       - name: Wait until the service is ready
         run: |
@@ -81,6 +86,8 @@ jobs:
             sleep 1
           done
           echo "service did not become ready"
+          docker ps -a
+          docker logs rul
           exit 1
 
       - name: Valid request returns a sensible prediction
@@ -104,7 +111,7 @@ jobs:
       - name: Show container logs if anything failed
         if: failure()
         run: docker logs rul
-
+        
   publish:
     name: Build and publish image
     runs-on: ubuntu-latest
